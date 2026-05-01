@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>💰 Crypto Payment Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .transaction-row:hover {
+            background-color: rgba(59, 130, 246, 0.05);
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+        .status-pending { background-color: #fef08a; color: #854d0e; }
+        .status-confirmed { background-color: #dbeafe; color: #0c2340; }
+        .status-completed { background-color: #dcfce7; color: #15803d; }
+        .status-failed { background-color: #fee2e2; color: #7c2d12; }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
+            <div class="flex items-center space-x-2">
+                <i class="fas fa-coins text-2xl text-blue-600"></i>
+                <h1 class="text-2xl font-bold text-gray-800">Crypto Payment Dashboard</h1>
+            </div>
+            <div class="text-sm text-gray-600">
+                Last updated: <span id="lastUpdate">now</span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <!-- Statistics Cards -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <!-- Total Transactions -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-600 text-sm">Total Transactions</p>
+                        <p class="text-3xl font-bold text-gray-800" id="totalTransactions">-</p>
+                    </div>
+                    <i class="fas fa-exchange-alt text-3xl text-blue-500 opacity-20"></i>
+                </div>
+                <p class="text-xs text-gray-500 mt-2" id="trans7d">0 in last 7 days</p>
+            </div>
+
+            <!-- Total Volume -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-600 text-sm">Total Volume</p>
+                        <p class="text-3xl font-bold text-gray-800" id="totalVolume">-</p>
+                    </div>
+                    <i class="fas fa-chart-line text-3xl text-green-500 opacity-20"></i>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">USD</p>
+            </div>
+
+            <!-- Pending Transactions -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-600 text-sm">Pending</p>
+                        <p class="text-3xl font-bold text-yellow-600" id="pendingCount">-</p>
+                    </div>
+                    <i class="fas fa-hourglass-half text-3xl text-yellow-500 opacity-20"></i>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Awaiting confirmation</p>
+            </div>
+
+            <!-- Completed Transactions -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <p class="text-gray-600 text-sm">Completed</p>
+                        <p class="text-3xl font-bold text-green-600" id="completedCount">-</p>
+                    </div>
+                    <i class="fas fa-check-circle text-3xl text-green-500 opacity-20"></i>
+                </div>
+                <p class="text-xs text-gray-500 mt-2">Successfully confirmed</p>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+            <!-- Crypto Distribution Chart -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-lg font-bold text-gray-800 mb-4">Crypto Distribution</h2>
+                <canvas id="cryptoChart"></canvas>
+            </div>
+
+            <!-- Status Distribution Chart -->
+            <div class="bg-white rounded-lg shadow-md p-6">
+                <h2 class="text-lg font-bold text-gray-800 mb-4">Transaction Status</h2>
+                <canvas id="statusChart"></canvas>
+            </div>
+        </div>
+
+        <!-- Daily Transactions Chart -->
+        <div class="bg-white rounded-lg shadow-md p-6 mb-8">
+            <h2 class="text-lg font-bold text-gray-800 mb-4">Daily Transactions (Last 30 Days)</h2>
+            <canvas id="dailyChart" style="max-height: 300px;"></canvas>
+        </div>
+
+        <!-- Transactions Table -->
+        <div class="bg-white rounded-lg shadow-md p-6">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-lg font-bold text-gray-800">Recent Transactions</h2>
+                <div class="flex space-x-2">
+                    <select id="statusFilter" class="px-3 py-2 border border-gray-300 rounded-md text-sm">
+                        <option value="">All Status</option>
+                        <option value="pending">Pending</option>
+                        <option value="confirmed">Confirmed</option>
+                        <option value="completed">Completed</option>
+                        <option value="failed">Failed</option>
+                    </select>
+                    <button onclick="exportData()" class="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
+                        <i class="fas fa-download mr-2"></i>Export CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead>
+                        <tr class="border-b border-gray-200">
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Transaction ID</th>
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Type</th>
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Amount</th>
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Exchange Rate</th>
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Status</th>
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Date</th>
+                            <th class="text-left px-4 py-3 text-sm font-semibold text-gray-700">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transactionsTableBody">
+                        <!-- Loaded dynamically -->
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            <div class="flex justify-between items-center mt-6 pt-6 border-t border-gray-200">
+                <div class="text-sm text-gray-600">
+                    Page <span id="currentPage">1</span> of <span id="totalPages">1</span>
+                </div>
+                <div class="flex space-x-2">
+                    <button onclick="previousPage()" class="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50">
+                        <i class="fas fa-chevron-left"></i> Previous
+                    </button>
+                    <button onclick="nextPage()" class="px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50">
+                        Next <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Transaction Detail Modal -->
+    <div id="detailModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg shadow-lg p-8 max-w-md w-full">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold text-gray-800">Transaction Details</h2>
+                <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="modalContent" class="space-y-3">
+                <!-- Loaded dynamically -->
+            </div>
+            <div class="mt-6 flex space-x-3">
+                <button onclick="closeModal()" class="flex-1 px-4 py-2 border border-gray-300 rounded-md text-sm hover:bg-gray-50">
+                    Close
+                </button>
+                <button onclick="confirmTransaction()" class="flex-1 px-4 py-2 bg-green-600 text-white rounded-md text-sm hover:bg-green-700">
+                    Mark as Confirmed
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let selectedTransactionId = null;
+        let cryptoChart = null;
+        let statusChart = null;
+        let dailyChart = null;
+
+        // Initialize dashboard
+        function init() {
+            loadStats();
+            loadAnalytics();
+            loadTransactions();
+            setInterval(loadStats, 30000); // Refresh stats every 30 seconds
+            setInterval(loadTransactions, 30000);
+        }
+
+        // Load dashboard statistics
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/dashboard/stats');
+                const data = await response.json();
+
+                if (data.success) {
+                    document.getElementById('totalTransactions').textContent = data.total_transactions;
+                    document.getElementById('totalVolume').textContent = '$' + data.total_volume_usd.toFixed(2);
+                    document.getElementById('pendingCount').textContent = data.status_breakdown.pending;
+                    document.getElementById('completedCount').textContent = data.status_breakdown.completed;
+                    document.getElementById('trans7d').textContent = data.transactions_7d + ' in last 7 days';
+                    document.getElementById('lastUpdate').textContent = new Date(data.timestamp).toLocaleTimeString();
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+
+        // Load analytics data and update charts
+        async function loadAnalytics() {
+            try {
+                const response = await fetch('/api/dashboard/analytics');
+                const data = await response.json();
+
+                if (data.success) {
+                    updateCryptoChart(data.crypto_breakdown);
+                    updateStatusChart(data.status_breakdown);
+                    updateDailyChart(data.daily_transactions);
+                }
+            } catch (error) {
+                console.error('Error loading analytics:', error);
+            }
+        }
+
+        // Update crypto distribution chart
+        function updateCryptoChart(data) {
+            const ctx = document.getElementById('cryptoChart').getContext('2d');
+            
+            if (cryptoChart) {
+                cryptoChart.destroy();
+            }
+
+            cryptoChart = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: data.map(d => d.crypto),
+                    datasets: [{
+                        data: data.map(d => d.transactions),
+                        backgroundColor: [
+                            '#3b82f6',
+                            '#10b981',
+                            '#f59e0b',
+                            '#ef4444'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update status distribution chart
+        function updateStatusChart(data) {
+            const ctx = document.getElementById('statusChart').getContext('2d');
+            
+            if (statusChart) {
+                statusChart.destroy();
+            }
+
+            const statusColors = {
+                'pending': '#fbbf24',
+                'confirmed': '#60a5fa',
+                'completed': '#34d399',
+                'failed': '#f87171'
+            };
+
+            statusChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(d => d.status.charAt(0).toUpperCase() + d.status.slice(1)),
+                    datasets: [{
+                        label: 'Transactions',
+                        data: data.map(d => d.count),
+                        backgroundColor: data.map(d => statusColors[d.status])
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    indexAxis: 'y',
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Update daily transactions chart
+        function updateDailyChart(data) {
+            const ctx = document.getElementById('dailyChart').getContext('2d');
+            
+            if (dailyChart) {
+                dailyChart.destroy();
+            }
+
+            dailyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(d => d.date),
+                    datasets: [{
+                        label: 'Transactions',
+                        data: data.map(d => d.transactions),
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        tension: 0.4,
+                        fill: true
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load transactions with pagination
+        async function loadTransactions() {
+            try {
+                const statusFilter = document.getElementById('statusFilter').value;
+                let url = `/api/dashboard/transactions?page=${currentPage}&per_page=10`;
+                if (statusFilter) {
+                    url += `&status=${statusFilter}`;
+                }
+
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.success) {
+                    renderTransactionsTable(data.data);
+                    document.getElementById('currentPage').textContent = data.pagination.page;
+                    document.getElementById('totalPages').textContent = data.pagination.pages;
+                }
+            } catch (error) {
+                console.error('Error loading transactions:', error);
+            }
+        }
+
+        // Render transactions table
+        function renderTransactionsTable(transactions) {
+            const tbody = document.getElementById('transactionsTableBody');
+            tbody.innerHTML = '';
+
+            transactions.forEach(tx => {
+                const row = document.createElement('tr');
+                row.className = 'transaction-row border-b border-gray-200 cursor-pointer';
+                row.innerHTML = `
+                    <td class="px-4 py-3 text-sm text-gray-600 font-mono">${tx.id.substring(0, 8)}...</td>
+                    <td class="px-4 py-3 text-sm">${tx.crypto_symbol} → ${tx.fiat_symbol}</td>
+                    <td class="px-4 py-3 text-sm font-semibold">${tx.crypto_amount.toFixed(8)} ${tx.crypto_symbol}</td>
+                    <td class="px-4 py-3 text-sm">1 ${tx.crypto_symbol} = ${tx.exchange_rate.toFixed(2)} ${tx.fiat_symbol}</td>
+                    <td class="px-4 py-3 text-sm">
+                        <span class="status-badge status-${tx.status}">${tx.status}</span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-gray-600">${new Date(tx.created_at).toLocaleDateString()}</td>
+                    <td class="px-4 py-3 text-sm">
+                        <button onclick="viewDetails('${tx.id}')" class="text-blue-600 hover:text-blue-800">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        // View transaction details
+        async function viewDetails(transactionId) {
+            try {
+                selectedTransactionId = transactionId;
+                const response = await fetch(`/api/dashboard/transaction/${transactionId}`);
+                const data = await response.json();
+
+                if (data.success) {
+                    const tx = data.data;
+                    const modalContent = document.getElementById('modalContent');
+                    modalContent.innerHTML = `
+                        <div>
+                            <p class="text-sm text-gray-600">Transaction ID</p>
+                            <p class="text-sm font-mono break-all">${tx.id}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Type</p>
+                            <p class="text-sm font-semibold">${tx.crypto_amount} ${tx.crypto_symbol} ← ${tx.fiat_amount} ${tx.fiat_symbol}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Exchange Rate</p>
+                            <p class="text-sm">1 ${tx.crypto_symbol} = ${tx.exchange_rate} ${tx.fiat_symbol}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Wallet Address</p>
+                            <p class="text-sm font-mono break-all">${tx.wallet_address}</p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Status</p>
+                            <p class="text-sm"><span class="status-badge status-${tx.status}">${tx.status}</span></p>
+                        </div>
+                        <div>
+                            <p class="text-sm text-gray-600">Created</p>
+                            <p class="text-sm">${new Date(tx.created_at).toLocaleString()}</p>
+                        </div>
+                    `;
+                    document.getElementById('detailModal').classList.remove('hidden');
+                }
+            } catch (error) {
+                console.error('Error loading transaction details:', error);
+            }
+        }
+
+        // Confirm transaction (mark as confirmed)
+        async function confirmTransaction() {
+            if (!selectedTransactionId) return;
+
+            try {
+                const response = await fetch(`/api/dashboard/transaction/${selectedTransactionId}/update-status`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'confirmed' })
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('Transaction confirmed!');
+                    closeModal();
+                    loadStats();
+                    loadTransactions();
+                    loadAnalytics();
+                }
+            } catch (error) {
+                console.error('Error confirming transaction:', error);
+            }
+        }
+
+        // Close modal
+        function closeModal() {
+            document.getElementById('detailModal').classList.add('hidden');
+            selectedTransactionId = null;
+        }
+
+        // Pagination
+        function nextPage() {
+            currentPage++;
+            loadTransactions();
+        }
+
+        function previousPage() {
+            if (currentPage > 1) {
+                currentPage--;
+                loadTransactions();
+            }
+        }
+
+        // Export data as CSV
+        function exportData() {
+            window.location.href = '/api/dashboard/export';
+        }
+
+        // Status filter change
+        document.getElementById('statusFilter').addEventListener('change', () => {
+            currentPage = 1;
+            loadTransactions();
+        });
+
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
