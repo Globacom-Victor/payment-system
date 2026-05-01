@@ -4,13 +4,14 @@ from datetime import datetime
 from models import Transaction
 from sqlalchemy.orm import Session
 from crypto_api import CoinGeckoAPI, BlockchainAPI, EtherscanAPI, CryptoAPIException
+from email_service import EmailService
 import logging
-from config import ETHERSCAN_API_KEY
+from config import ETHERSCAN_API_KEY, NOTIFICATIONS_ENABLED, NOTIFY_CUSTOMER, NOTIFY_ADMIN, ADMIN_EMAIL
 
 logger = logging.getLogger(__name__)
 
 class PaymentServiceV2:
-    """Enhanced payment service with real cryptocurrency API integration"""
+    """Enhanced payment service with real cryptocurrency API integration and email notifications"""
     
     # Supported cryptocurrencies with their networks
     SUPPORTED_CRYPTOS = {
@@ -55,7 +56,7 @@ class PaymentServiceV2:
         },
         'XRP': {
             'format': lambda x: x.startswith('r') and len(x) > 25,
-            'api_validator': None,  # No public free API for XRP validation
+            'api_validator': None,
         },
     }
     
@@ -71,6 +72,7 @@ class PaymentServiceV2:
         self.coingecko = CoinGeckoAPI(cache_ttl=coingecko_cache_ttl)
         self.blockchain = BlockchainAPI()
         self.etherscan = EtherscanAPI(api_key=etherscan_api_key or ETHERSCAN_API_KEY)
+        self.email_service = EmailService() if NOTIFICATIONS_ENABLED else None
     
     def validate_wallet_address(self, crypto: str, wallet_address: str) -> bool:
         """Validate wallet address using real blockchain APIs
@@ -110,19 +112,19 @@ class PaymentServiceV2:
                 
         except CryptoAPIException as e:
             logger.warning(f"API validation warning: {str(e)}")
-            # Continue anyway as some addresses may not have balance yet
         
         return True
     
     def create_purchase(self, crypto_symbol: str, fiat_symbol: str,
-                       fiat_amount: float, wallet_address: str) -> Transaction:
-        """Create a new purchase transaction with real exchange rates
+                       fiat_amount: float, wallet_address: str, customer_email: str = None) -> Transaction:
+        """Create a new purchase transaction with real exchange rates and send email notification
         
         Args:
             crypto_symbol: Cryptocurrency symbol
             fiat_symbol: Fiat currency symbol
             fiat_amount: Amount in fiat currency
             wallet_address: Destination wallet address
+            customer_email: Customer email for notifications
             
         Returns:
             Transaction: Created transaction object
@@ -181,6 +183,11 @@ class PaymentServiceV2:
         self.session.commit()
         
         logger.info(f"Transaction created: {transaction.id}")
+        
+        # Send email notification
+        if NOTIFICATIONS_ENABLED and customer_email:
+            self._send_payment_created_notification(transaction, customer_email)
+        
         return transaction
     
     def get_market_data(self, crypto: str, fiat: str) -> dict:
@@ -223,20 +230,109 @@ class PaymentServiceV2:
         """
         return self.session.query(Transaction).order_by(Transaction.created_at.desc()).all()
     
-    def update_transaction_status(self, transaction_id: str, status: str):
-        """Update transaction status
+    def update_transaction_status(self, transaction_id: str, status: str, customer_email: str = None):
+        """Update transaction status and send email notification
         
         Args:
             transaction_id: Transaction ID
             status: New status
+            customer_email: Customer email for notifications
             
         Returns:
             Transaction: Updated transaction
         """
         transaction = self.get_transaction_status(transaction_id)
+        old_status = transaction.status
         transaction.status = status
         transaction.updated_at = datetime.utcnow()
         self.session.commit()
         
         logger.info(f"Transaction {transaction_id} status updated to {status}")
+        
+        # Send email notification
+        if NOTIFICATIONS_ENABLED and customer_email:
+            self._send_status_update_notification(transaction, customer_email)
+        
         return transaction
+    
+    def _send_payment_created_notification(self, transaction: Transaction, customer_email: str):
+        """Send payment created notification email
+        
+        Args:
+            transaction: Transaction object
+            customer_email: Customer email address
+        """
+        try:
+            if not self.email_service:
+                logger.warning("Email service not available")
+                return
+            
+            transaction_data = {
+                'transaction_id': transaction.id,
+                'crypto_symbol': transaction.crypto_symbol,
+                'crypto_amount': str(transaction.crypto_amount),
+                'fiat_symbol': transaction.fiat_symbol,
+                'fiat_amount': str(transaction.fiat_amount),
+                'exchange_rate': str(transaction.exchange_rate),
+                'wallet_address': transaction.wallet_address,
+                'created_at': transaction.created_at.strftime('%Y-%m-%d %H:%M:%S UTC')
+            }
+            
+            if NOTIFY_CUSTOMER:
+                self.email_service.send_payment_created_email(customer_email, transaction_data)
+                logger.info(f"Payment created notification sent to {customer_email}")
+            
+            if NOTIFY_ADMIN:
+                self.email_service.send_payment_created_email(ADMIN_EMAIL, transaction_data)
+                logger.info(f"Payment created notification sent to admin")
+                
+        except Exception as e:
+            logger.error(f"Error sending payment created notification: {str(e)}")
+    
+    def _send_status_update_notification(self, transaction: Transaction, customer_email: str):
+        """Send status update notification email
+        
+        Args:
+            transaction: Transaction object
+            customer_email: Customer email address
+        """
+        try:
+            if not self.email_service:
+                logger.warning("Email service not available")
+                return
+            
+            transaction_data = {
+                'transaction_id': transaction.id,
+                'crypto_symbol': transaction.crypto_symbol,
+                'crypto_amount': str(transaction.crypto_amount),
+                'fiat_symbol': transaction.fiat_symbol,
+                'fiat_amount': str(transaction.fiat_amount),
+                'wallet_address': transaction.wallet_address,
+                'confirmed_at': transaction.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                'completed_at': transaction.updated_at.strftime('%Y-%m-%d %H:%M:%S UTC'),
+                'failure_reason': 'Transaction could not be processed. Please try again.'
+            }
+            
+            # Send appropriate email based on status
+            if transaction.status == 'confirmed':
+                if NOTIFY_CUSTOMER:
+                    self.email_service.send_payment_confirmed_email(customer_email, transaction_data)
+                if NOTIFY_ADMIN:
+                    self.email_service.send_payment_confirmed_email(ADMIN_EMAIL, transaction_data)
+                    
+            elif transaction.status == 'completed':
+                if NOTIFY_CUSTOMER:
+                    self.email_service.send_payment_completed_email(customer_email, transaction_data)
+                if NOTIFY_ADMIN:
+                    self.email_service.send_payment_completed_email(ADMIN_EMAIL, transaction_data)
+                    
+            elif transaction.status == 'failed':
+                if NOTIFY_CUSTOMER:
+                    self.email_service.send_payment_failed_email(customer_email, transaction_data)
+                if NOTIFY_ADMIN:
+                    self.email_service.send_payment_failed_email(ADMIN_EMAIL, transaction_data)
+            
+            logger.info(f"Status update notification sent for transaction {transaction.id}")
+                
+        except Exception as e:
+            logger.error(f"Error sending status update notification: {str(e)}")
